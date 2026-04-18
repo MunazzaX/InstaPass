@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>InataPass – AI Image Editing SaaS</title>
+  <meta name="description" content="InataPass – Remove backgrounds, edit images & download in full quality with AI." />
+  <meta property="og:title" content="InataPass – AI Image Editing" />
+  <meta property="og:description" content="Professional AI-powered background removal & image editing." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- LOADER -->
+<div id="loader" class="loader-screen">
+  <div class="loader-inner">
+    <div class="loader-logo">
+      <span class="loader-icon">✦</span>
+      <span class="loader-brand">InataPass</span>
+    </div>
+    <div class="loader-bar-wrap">
+      <div class="loader-bar" id="loaderBar"></div>
+    </div>
+    <p class="loader-tagline">Powering your AI studio…</p>
+  </div>
+</div>
+
+<!-- OFFLINE BANNER -->
+<div id="offlineBanner" class="offline-banner hidden">
+  <span>⚠️ No internet connection – some features may be unavailable.</span>
+</div>
+
+<!-- AUTH SCREEN -->
+<div id="authScreen" class="auth-screen hidden">
+  <div class="auth-bg-blobs">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+    <div class="blob b3"></div>
+  </div>
+  <div class="auth-card">
+    <div class="auth-logo">✦ <span>InataPass</span></div>
+    <p class="auth-subtitle">Create your free account to get started</p>
+    <div class="auth-form active">
+      <div class="input-group">
+        <label>Full Name</label>
+        <input type="text" id="regName" placeholder="Your name" />
+      </div>
+      <div class="input-group">
+        <label>Email Address</label>
+        <input type="email" id="regEmail" placeholder="you@example.com" />
+      </div>
+      <button class="btn-primary full-width sound-btn" id="registerBtn" onclick="handleRegister()">Create Account →</button>
+      <p class="auth-note" id="regError"></p>
+    </div>
+    <p class="auth-footer-note">By continuing you agree to our Terms &amp; Privacy Policy.</p>
+  </div>
+</div>
+
+<!-- ACCESS CODE SCREEN (shown after tapping Purchase) -->
+<div id="accessCodeScreen" class="access-code-screen hidden">
+  <div class="access-bg-blobs">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+  </div>
+  <div class="access-card">
+    <div class="access-logo">✦ <span>InataPass</span></div>
+    <div class="access-plan-info" id="accessPlanInfo"></div>
+    <h2 class="access-title">Enter Access Code</h2>
+    <p class="access-subtitle">Complete payment via your payment app, then enter the access code provided by admin to activate your plan.</p>
+    <div class="access-code-box">
+      <input type="text" id="accessCodeInput" placeholder="e.g. @Munazza#" autocomplete="off" />
+      <button class="btn-primary full-width sound-btn" onclick="verifyAccessCode()">Activate Plan ✦</button>
+      <p class="access-note" id="accessNote"></p>
+    </div>
+    <button class="access-back-btn sound-btn" onclick="closeAccessCodeScreen()">← Back</button>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="appScreen" class="app-screen hidden">
+
+  <nav class="top-nav">
+    <div class="nav-logo">✦ InataPass</div>
+    <div class="nav-actions">
+      <button class="nav-icon-btn sound-btn" title="History" onclick="togglePanel('historyPanel')">🕓</button>
+      <button class="nav-icon-btn sound-btn" title="Subscription" onclick="togglePanel('subPanel')">💎</button>
+      <button class="nav-icon-btn sound-btn" title="Developer" onclick="togglePanel('devPanel')">👨‍💻</button>
+      <div class="nav-user" id="navUser"></div>
+      <button class="nav-logout sound-btn" onclick="handleLogout()">Sign Out</button>
+    </div>
+  </nav>
+
+  <section class="hero-section" id="heroSection">
+    <div class="hero-content">
+      <div class="hero-badge">✦ AI-Powered Studio</div>
+      <h1 class="hero-title">Remove. Edit. <em>Reimagine.</em></h1>
+      <p class="hero-sub">Drop your image and watch the magic happen — backgrounds vanish in seconds.</p>
+      <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()" ondragover="handleDragOver(event)" ondrop="handleDrop(event)">
+        <div class="upload-icon">⬆</div>
+        <p class="upload-label">Drop image here or <strong>click to upload</strong></p>
+        <p class="upload-hint">JPG, PNG, WEBP – Any size accepted</p>
+        <div class="upload-limit-badge" id="uploadLimitBadge"></div>
+      </div>
+      <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="handleFileSelect(event)" />
+    </div>
+  </section>
+
+  <section class="editor-section hidden" id="editorSection">
+    <div class="editor-layout">
+      <div class="canvas-panel">
+        <div class="canvas-wrap" id="canvasWrap">
+          <canvas id="mainCanvas"></canvas>
+          <div class="canvas-loader hidden" id="canvasLoader">
+            <div class="spin-ring"></div>
+            <p>Removing background…</p>
+          </div>
+        </div>
+        <div class="canvas-actions">
+          <button class="btn-secondary sound-btn" onclick="goBackToUpload()">← New Image</button>
+          <button class="btn-primary sound-btn" onclick="downloadImage()">⬇ Download</button>
+          <button class="btn-outline sound-btn" onclick="shareImage()">↗ Share</button>
+          <button class="btn-outline sound-btn" onclick="saveToHistory()">💾 Save</button>
+        </div>
+      </div>
+
+      <div class="tools-panel">
+        <div class="tool-section">
+          <h3 class="tool-title">Background Removal</h3>
+          <button class="btn-primary full-width sound-btn" id="removeBgBtn" onclick="removeBg()">✂ Remove Background</button>
+        </div>
+        <div class="tool-section">
+          <h3 class="tool-title">Background Color</h3>
+          <div class="color-grid" id="colorGrid"></div>
+        </div>
+        <div class="tool-section">
+          <h3 class="tool-title">Background Scenes</h3>
+          <div class="theme-grid" id="themeGrid"></div>
+        </div>
+        <div class="tool-section">
+          <h3 class="tool-title">Image Controls</h3>
+          <div class="slider-group">
+            <label>Brightness <span id="brightnessVal">100</span>%</label>
+            <input type="range" id="brightnessSlider" min="0" max="200" value="100" oninput="applyFilters()" />
+          </div>
+          <div class="slider-group">
+            <label>Contrast <span id="contrastVal">100</span>%</label>
+            <input type="range" id="contrastSlider" min="0" max="200" value="100" oninput="applyFilters()" />
+          </div>
+          <div class="slider-group">
+            <label>Saturation <span id="saturationVal">100</span>%</label>
+            <input type="range" id="saturationSlider" min="0" max="200" value="100" oninput="applyFilters()" />
+          </div>
+          <div class="slider-group">
+            <label>Sharpness <span id="sharpnessVal">0</span></label>
+            <input type="range" id="sharpnessSlider" min="0" max="10" value="0" step="0.5" oninput="applyFilters()" />
+          </div>
+          <div class="slider-group">
+            <label>Blur <span id="blurVal">0</span>px</label>
+            <input type="range" id="blurSlider" min="0" max="20" value="0" step="0.5" oninput="applyFilters()" />
+          </div>
+          <button class="btn-outline full-width sound-btn" onclick="resetFilters()">↺ Reset Filters</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HISTORY PANEL -->
+  <div class="slide-panel" id="historyPanel">
+    <div class="panel-header">
+      <h2>Edit History</h2>
+      <button class="panel-close sound-btn" onclick="togglePanel('historyPanel')">✕</button>
+    </div>
+    <div class="panel-body" id="historyList">
+      <p class="empty-state">No saved edits yet. Save an edit to see it here.</p>
+    </div>
+  </div>
+
+  <!-- SUBSCRIPTION PANEL -->
+  <div class="slide-panel" id="subPanel">
+    <div class="panel-header">
+      <h2>Subscription</h2>
+      <button class="panel-close sound-btn" onclick="togglePanel('subPanel')">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="plan-status" id="planStatus"></div>
+      <div class="plan-cards">
+        <div class="plan-card free-card">
+          <div class="plan-badge">Free</div>
+          <div class="plan-price">₹0</div>
+          <ul class="plan-features">
+            <li>✓ 5 uploads</li>
+            <li>✓ Basic editing</li>
+            <li>✗ Unlimited uploads</li>
+            <li>✗ Premium scenes</li>
+          </ul>
+        </div>
+        <div class="plan-card monthly-card">
+          <div class="plan-badge popular">Monthly</div>
+          <div class="plan-price">₹199 <span>/31 days</span></div>
+          <ul class="plan-features">
+            <li>✓ Unlimited uploads</li>
+            <li>✓ All editing tools</li>
+            <li>✓ All scenes &amp; colors</li>
+            <li>✓ Priority support</li>
+          </ul>
+          <button class="btn-purchase full-width sound-btn" onclick="openPurchase('monthly')">
+            💳 Purchase – ₹199
+          </button>
+        </div>
+        <div class="plan-card premium-card">
+          <div class="plan-badge premium">Premium</div>
+          <div class="plan-price">₹550 <span>/95 days</span></div>
+          <ul class="plan-features">
+            <li>✓ Everything in Monthly</li>
+            <li>✓ Premium features</li>
+            <li>✓ Priority support</li>
+            <li>✓ Early access</li>
+          </ul>
+          <button class="btn-purchase full-width sound-btn btn-purchase-premium" onclick="openPurchase('premium')">
+            💳 Purchase – ₹550
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEVELOPER PANEL -->
+  <div class="slide-panel" id="devPanel">
+    <div class="panel-header">
+      <h2>About &amp; Developer</h2>
+      <button class="panel-close sound-btn" onclick="togglePanel('devPanel')">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="dev-card">
+        <div class="dev-avatar">👩‍💻</div>
+        <h3>Munazza Shaikh</h3>
+        <p class="dev-title">Full-Stack Developer &amp; Creative Technologist</p>
+        <div class="dev-links">
+          <a href="tel:7069878373" class="dev-link sound-btn">📞 +91 7069878373</a>
+          <a href="mailto:munazzashaikh531@gmail.com" class="dev-link sound-btn">✉ munazzashaikh531@gmail.com</a>
+        </div>
+        <div class="dev-skills-section">
+          <p class="dev-skills-title">Skills &amp; Expertise</p>
+          <div class="dev-skills-grid">
+            <div class="dev-skill-item">
+              <span class="dsi-icon">🎨</span>
+              <div class="dsi-info">
+                <span class="dsi-name">Web Design</span>
+              </div>
+            </div>
+            <div class="dev-skill-item highlight-skill">
+              <span class="dsi-icon">🖌️</span>
+              <div class="dsi-info">
+                <span class="dsi-name">Graphic Design</span>
+                <span class="dsi-desc">Main Skill — Crafting visuals that speak louder than words. From brand identities to stunning digital art, every pixel is placed with purpose and passion.</span>
+              </div>
+            </div>
+            <div class="dev-skill-item">
+              <span class="dsi-icon">🔍</span>
+              <div class="dsi-info">
+                <span class="dsi-name">SEO Specialist</span>
+              </div>
+            </div>
+            <div class="dev-skill-item">
+              <span class="dsi-icon">🤖</span>
+              <div class="dsi-info">
+                <span class="dsi-name">AI Handling</span>
+              </div>
+            </div>
+            <div class="dev-skill-item">
+              <span class="dsi-icon">🎯</span>
+              <div class="dsi-info">
+                <span class="dsi-name">UI/UX Designer</span>
+              </div>
+            </div>
+            <div class="dev-skill-item">
+              <span class="dsi-icon">⚡</span>
+              <div class="dsi-info">
+                <span class="dsi-name">Web Development</span>
+              </div>
+            </div>
+            <div class="dev-skill-item">
+              <span class="dsi-icon">🎭</span>
+              <div class="dsi-info">
+                <span class="dsi-name">Digital Artist</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="dev-meta">
+          <span>InataPass v1.0</span>
+          <span>© 2025 InataPass</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-overlay hidden" id="panelOverlay" onclick="closeAllPanels()"></div>
+
+  <!-- SUPPORT PANEL -->
+  <div class="slide-panel" id="supportPanel">
+    <div class="panel-header">
+      <h2>Support</h2>
+      <button class="panel-close sound-btn" onclick="togglePanel('supportPanel')">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="support-card">
+        <div class="support-hero">
+          <div class="support-icon">🛟</div>
+          <h3>24/7 Support</h3>
+          <p>We're always here to help — anytime, day or night.</p>
+        </div>
+        <div class="support-items">
+          <div class="support-item">
+            <div class="si-icon">💳</div>
+            <div class="si-content">
+              <h4>Subscription Issues</h4>
+              <p>Payment done but plan not activated? Send your payment screenshot and we'll activate your plan within minutes.</p>
+            </div>
+          </div>
+          <div class="support-item">
+            <div class="si-icon">👤</div>
+            <div class="si-content">
+              <h4>Account Problems</h4>
+              <p>Can't log in or account not found? Contact us with your registered email and we'll sort it out immediately.</p>
+            </div>
+          </div>
+          <div class="support-item">
+            <div class="si-icon">🖼️</div>
+            <div class="si-content">
+              <h4>Background Removal Issues</h4>
+              <p>Getting errors while editing? Tell us the exact error message and we'll fix it for you right away.</p>
+            </div>
+          </div>
+          <div class="support-item">
+            <div class="si-icon">🔄</div>
+            <div class="si-content">
+              <h4>Refunds &amp; Renewals</h4>
+              <p>Need a refund or want to renew early? All requests processed within 24 hours, no questions asked.</p>
+            </div>
+          </div>
+          <div class="support-item">
+            <div class="si-icon">❓</div>
+            <div class="si-content">
+              <h4>General Queries</h4>
+              <p>Feature request, bug report, or any other question? We love hearing from our users — reach out anytime!</p>
+            </div>
+          </div>
+        </div>
+        <div class="support-contact">
+          <p class="support-contact-title">📬 Reach Us Directly</p>
+          <a href="mailto:munazzashaikh531@gmail.com" class="support-contact-link sound-btn">
+            <span>✉️</span> munazzashaikh531@gmail.com
+          </a>
+          <a href="tel:7069878373" class="support-contact-link sound-btn">
+            <span>📞</span> +91 7069878373
+          </a>
+          <p class="support-response-note">⚡ Average response time: under 1 hour</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    <div class="footer-inner">
+      <div class="footer-brand">✦ InataPass</div>
+      <div class="footer-links">
+        <a href="#" onclick="togglePanel('devPanel')" class="sound-btn">About</a>
+        <a href="#" onclick="togglePanel('supportPanel')" class="sound-btn">Support</a>
+        <a href="#" onclick="togglePanel('devPanel')" class="sound-btn">Developer</a>
+      </div>
+      <p class="footer-copy">© 2025 InataPass · Built with ♥ by Munazza Shaikh</p>
+    </div>
+  </footer>
+
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="main.js"></script>
+</body>
+</html>
