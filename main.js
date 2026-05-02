@@ -9,7 +9,7 @@
    CONFIG
 ───────────────────────────────────────────── */
 const CONFIG = {
-  REMOVE_BG_API: 'qEXXXw8tML4BfztGFcYLkfJs',
+  REMOVE_BG_API: 'KPZW2fFUwFJ6SMgD6q21uuEt',
   ACTIVATION_CODE: '@Munazza#',
   DEV_EMAIL: 'munazzashaikh531@gmail.com',
   PLANS: {
