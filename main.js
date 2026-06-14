@@ -1,43 +1,91 @@
 /* ═══════════════════════════════════════════════
-   INATAPASS – main.js  (v2.0 – fully updated)
-   Fixes: email-dup check, BG removal, themes, payment flow
+   INSTAPASS – main.js  v2.0
+   Firebase Auth · Razorpay · Light Theme
+   Time Security · Watermark · Advanced Editor
 ═══════════════════════════════════════════════ */
-
 'use strict';
 
 /* ─────────────────────────────────────────────
    CONFIG
 ───────────────────────────────────────────── */
 const CONFIG = {
-  REMOVE_BG_API: 'a9sd1C2xXSQvtwG4Lrjqxn7G',
-  ACTIVATION_CODE: '@Munazza#',
-  DEV_EMAIL: 'munazzashaikh531@gmail.com',
   PLANS: {
-    free:    { uploads: 5,       days: 0,  price: 0   },
-    monthly: { uploads: Infinity, days: 31, price: 199 },
-    premium: { uploads: Infinity, days: 95, price: 550 }
+    free:       { requests: 3,   days: 0,   price: 0   },
+    lite_1m:    { requests: 20,  days: 30,  price: 59  },
+    lite_3m:    { requests: 60,  days: 90,  price: 169 },
+    lite_6m:    { requests: 120, days: 180, price: 349 },
+    lite_12m:   { requests: 240, days: 365, price: 699 },
+    pro:        { requests: 40,  days: 30,  price: 119 },
+    superpro:   { requests: 50,  days: 30,  price: 189 }
   },
-  EMAILJS_SERVICE_ID: 'service_inatapass',
-  EMAILJS_PUBLIC_KEY: 'YOUR_EMAILJS_PUBLIC_KEY',
-  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxZv0ngksoijxhtKANnoRV9AhbK0J-nrQO3YTMR3621Vlhw5P9SfUEVRtuzoQbGFfpb-Q/exec'
+  RAZORPAY_KEY: 'rzp_live_T177UduR2hzsZz',
+  TIME_THRESHOLD_MINUTES: 5
 };
 
 /* ─────────────────────────────────────────────
    STATE
 ───────────────────────────────────────────── */
 let appState = {
-  currentUser:       null,
   originalImageData: null,
   bgRemovedData:     null,
   activeBackground:  null,
-  canvasCtx:         null,
   history:           [],
   uploadCount:       0,
-  subscription:      { plan: 'free', expiry: null },
+  subscription:      { plan: 'free', expiry: null, remainingRequests: 3 },
   audioCtx:          null,
   isOnline:          navigator.onLine,
-  pendingPlan:       null   // holds plan user tapped Purchase on
+  firebaseUser:      null,
+  userDbData:        null,
+  activeFilter:      null,
+  selectedLitePlan:  'lite_1m',
+  timeChecked:       false
 };
+
+/* ─────────────────────────────────────────────
+   FIREBASE AUTH BRIDGE
+───────────────────────────────────────────── */
+window.onFirebaseAuthReady = async function(user) {
+  if (user) {
+    appState.firebaseUser = user;
+    // Reload user doc
+    if (window._fbGetDoc) {
+      try {
+        const snap = await window._fbGetDoc(user.uid);
+        if (snap.exists()) {
+          appState.userDbData = snap.data();
+          syncUserDataFromFirebase();
+        }
+      } catch(e) { console.warn('Firestore read error:', e); }
+    }
+    hideLauncherIfReady();
+  } else {
+    hideLauncherIfReady();
+  }
+};
+
+let loaderDone = false;
+
+function hideLauncherIfReady() {
+  if (!loaderDone) return;
+  const user = appState.firebaseUser;
+  document.getElementById('loader').style.display = 'none';
+  if (user) {
+    showApp();
+  } else {
+    document.getElementById('authScreen').classList.remove('hidden');
+  }
+}
+
+function syncUserDataFromFirebase() {
+  const d = appState.userDbData;
+  if (!d) return;
+  const planKey = d.plan || 'free';
+  appState.subscription = {
+    plan: planKey,
+    expiry: d.expiryDate || null,
+    remainingRequests: d.remainingRequests != null ? d.remainingRequests : CONFIG.PLANS[planKey]?.requests || 3
+  };
+}
 
 /* ─────────────────────────────────────────────
    AUDIO ENGINE
@@ -49,7 +97,6 @@ function getAudioCtx() {
   }
   return appState.audioCtx;
 }
-
 function playSound(type) {
   const ctx = getAudioCtx();
   if (!ctx) return;
@@ -58,14 +105,14 @@ function playSound(type) {
   osc.connect(gain);
   gain.connect(ctx.destination);
   const sounds = {
-    click:    { freq: 440, type: 'sine',     dur: 0.08, vol: 0.15 },
-    open:     { freq: 520, type: 'triangle', dur: 0.18, vol: 0.12 },
-    close:    { freq: 380, type: 'triangle', dur: 0.14, vol: 0.10 },
-    success:  { freq: 660, type: 'sine',     dur: 0.25, vol: 0.18 },
-    error:    { freq: 180, type: 'sawtooth', dur: 0.35, vol: 0.20 },
-    upload:   { freq: 580, type: 'sine',     dur: 0.20, vol: 0.15 },
-    loader:   { freq: 320, type: 'sine',     dur: 0.50, vol: 0.08 },
-    download: { freq: 740, type: 'sine',     dur: 0.22, vol: 0.16 }
+    click:    { freq: 440, type: 'sine',     dur: 0.08, vol: 0.08 },
+    open:     { freq: 520, type: 'triangle', dur: 0.15, vol: 0.07 },
+    close:    { freq: 380, type: 'triangle', dur: 0.12, vol: 0.06 },
+    success:  { freq: 660, type: 'sine',     dur: 0.22, vol: 0.1  },
+    error:    { freq: 200, type: 'sawtooth', dur: 0.3,  vol: 0.12 },
+    upload:   { freq: 580, type: 'sine',     dur: 0.18, vol: 0.08 },
+    loader:   { freq: 340, type: 'sine',     dur: 0.4,  vol: 0.05 },
+    download: { freq: 720, type: 'sine',     dur: 0.2,  vol: 0.09 }
   };
   const s = sounds[type] || sounds.click;
   osc.type = s.type;
@@ -76,17 +123,15 @@ function playSound(type) {
   osc.start(ctx.currentTime);
   osc.stop(ctx.currentTime + s.dur);
 }
-
 document.addEventListener('click', function(e) {
   const btn = e.target.closest('.sound-btn');
   if (btn) { playSound('click'); addRipple(btn, e); }
 });
-
 function addRipple(el, e) {
   const rect = el.getBoundingClientRect();
   const r    = document.createElement('span');
   r.className = 'ripple';
-  const size = Math.max(rect.width, rect.height);
+  const size  = Math.max(rect.width, rect.height);
   r.style.cssText = `width:${size}px;height:${size}px;left:${e.clientX-rect.left-size/2}px;top:${e.clientY-rect.top-size/2}px`;
   el.appendChild(r);
   setTimeout(() => r.remove(), 500);
@@ -104,272 +149,433 @@ function showToast(msg, type = '', duration = 3500) {
 }
 
 /* ─────────────────────────────────────────────
-   INTERNET CHECK
+   ONLINE / OFFLINE
 ───────────────────────────────────────────── */
 function checkOnline() {
   const banner = document.getElementById('offlineBanner');
-  if (!navigator.onLine) { banner.classList.remove('hidden'); playSound('error'); }
-  else                   { banner.classList.add('hidden'); }
-  appState.isOnline = navigator.onLine;
+  const online = navigator.onLine;
+  if (!online) { banner.classList.remove('hidden'); playSound('error'); }
+  else         { banner.classList.add('hidden'); }
+  appState.isOnline = online;
 }
 window.addEventListener('online',  checkOnline);
 window.addEventListener('offline', checkOnline);
 checkOnline();
 
 /* ─────────────────────────────────────────────
+   TIME SECURITY — Firebase Server Time
+   No third-party API. Uses Firebase Cloud Function.
+───────────────────────────────────────────── */
+async function checkInternetTime() {
+  const banner = document.getElementById('timeWarningBanner');
+  try {
+    // Call Firebase Cloud Function for trusted server time
+    const res  = await fetch('https://us-central1-instapass-web-fe974.cloudfunctions.net/getServerTime');
+    if (!res.ok) throw new Error('Server time fetch failed');
+    const data = await res.json();
+    const serverTime = data.serverTime; // Date.now() from server
+    const deviceTime = Date.now();
+    const diffMins   = Math.abs(serverTime - deviceTime) / 60000;
+    if (diffMins > CONFIG.TIME_THRESHOLD_MINUTES) {
+      banner.classList.add('hidden');
+      appState.timeBlocked = true;
+    } else {
+      banner.classList.add('hidden');
+      appState.timeBlocked = false;
+    }
+    appState.serverTime = serverTime;
+  } catch(e) {
+    // If Firebase server time is unavailable: show warning, allow app to continue
+    console.warn('Server time check unavailable:', e);
+    banner.classList.add('hidden');
+    appState.serverTime  = Date.now();
+    appState.timeBlocked = false; // Do NOT block login if server time cannot be fetched
+  }
+  appState.timeChecked = true;
+}
+
+/* ─────────────────────────────────────────────
    LOADER
 ───────────────────────────────────────────── */
 window.addEventListener('DOMContentLoaded', () => {
-  setTimeout(() => playSound('loader'), 300);
+  setTimeout(() => playSound('loader'), 400);
   const bar = document.getElementById('loaderBar');
   let pct   = 0;
   const interval = setInterval(() => {
-    pct += Math.random() * 18 + 5;
+    pct += Math.random() * 15 + 4;
     if (pct >= 100) { pct = 100; clearInterval(interval); }
     bar.style.width = pct + '%';
   }, 100);
+
+  // Run time check in background
+  checkInternetTime();
+
   setTimeout(() => {
-    document.getElementById('loader').classList.add('fade-out');
-    setTimeout(() => {
-      document.getElementById('loader').style.display = 'none';
-      initApp();
-    }, 500);
-  }, 2800);
+    loaderDone = true;
+    hideLauncherIfReady();
+  }, 2600);
+
+  // Setup Lite plan option selectors
+  setTimeout(setupLitePlanSelectors, 100);
+  // Setup paste upload
+  setupPasteUpload();
 });
 
 /* ─────────────────────────────────────────────
-   APP INIT
+   AUTH TABS
 ───────────────────────────────────────────── */
-function initApp() {
-  // Check localStorage for existing logged-in user
-  const saved = localStorage.getItem('inatapass_user');
-  if (saved) {
-    try {
-      const user = JSON.parse(saved);
-      if (user && user.email && user.name) {
-        // User found — auto-login, skip auth screen
-        appState.currentUser = { name: user.name, email: user.email };
-        loadUserState();
-        // Fetch current time from internet (validate subscription expiry)
-        fetchServerTime().finally(() => showApp());
-        return;
-      }
-    } catch(e) {
-      // Corrupted data — clear and show auth
-      localStorage.removeItem('inatapass_user');
-    }
+function switchAuthTab(tab) {
+  document.getElementById('loginForm').classList.remove('active');
+  document.getElementById('registerForm').classList.remove('active');
+  document.getElementById('tabLogin').classList.remove('active');
+  document.getElementById('tabRegister').classList.remove('active');
+  if (tab === 'login') {
+    document.getElementById('loginForm').classList.add('active');
+    document.getElementById('tabLogin').classList.add('active');
+  } else {
+    document.getElementById('registerForm').classList.add('active');
+    document.getElementById('tabRegister').classList.add('active');
   }
-  // No saved user — show create account screen
-  document.getElementById('authScreen').classList.remove('hidden');
 }
 
-async function fetchServerTime() {
+function togglePw(inputId, btn) {
+  const inp = document.getElementById(inputId);
+  inp.type  = inp.type === 'password' ? 'text' : 'password';
+}
+
+/* ─────────────────────────────────────────────
+   AUTH – LOGIN
+───────────────────────────────────────────── */
+async function handleLogin() {
+  const email = document.getElementById('loginEmail').value.trim().toLowerCase();
+  const pw    = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+  const btn   = document.getElementById('loginBtn');
+  errEl.textContent = '';
+  if (!email || !pw) { errEl.textContent = 'Email and password are required.'; playSound('error'); return; }
+  btn.textContent = 'Signing in…';
+  btn.disabled    = true;
   try {
-    const res  = await fetch('https://worldtimeapi.org/api/timezone/Asia/Kolkata');
-    const data = await res.json();
-    appState.serverTime = new Date(data.datetime).getTime();
+    if (!window._fbSignIn) throw new Error('Firebase not ready. Please refresh.');
+    await window._fbSignIn(email, pw);
+    playSound('success');
+    showToast('Welcome back!', 'success');
   } catch(e) {
-    appState.serverTime = Date.now();
+    errEl.textContent = getFriendlyError(e.code || e.message);
+    playSound('error');
+  }
+  btn.textContent = 'Sign In';
+  btn.disabled    = false;
+}
+
+/* ─────────────────────────────────────────────
+   AUTH – REGISTER
+───────────────────────────────────────────── */
+async function handleRegister() {
+  const name  = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value.trim().toLowerCase();
+  const pw    = document.getElementById('regPassword').value;
+  const errEl = document.getElementById('regError');
+  const btn   = document.getElementById('registerBtn');
+  errEl.textContent = '';
+  if (!name)  { errEl.textContent = 'Full name is required.'; playSound('error'); return; }
+  if (!email) { errEl.textContent = 'Email is required.'; playSound('error'); return; }
+  if (!/\S+@\S+\.\S+/.test(email)) { errEl.textContent = 'Invalid email address.'; playSound('error'); return; }
+  if (pw.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; playSound('error'); return; }
+  btn.textContent = 'Creating account…';
+  btn.disabled    = true;
+  try {
+    if (!window._fbRegister) throw new Error('Firebase not ready. Please refresh.');
+    const cred = await window._fbRegister(email, pw);
+    // Write user doc to Firestore (onAuthStateChanged handles initial doc creation)
+    playSound('success');
+    showToast('Account created! Welcome to InstaPass', 'success');
+  } catch(e) {
+    errEl.textContent = getFriendlyError(e.code || e.message);
+    playSound('error');
+  }
+  btn.textContent = 'Create Account';
+  btn.disabled    = false;
+}
+
+/* ─────────────────────────────────────────────
+   AUTH – GOOGLE
+───────────────────────────────────────────── */
+async function handleGoogleSignIn() {
+  try {
+    if (!window._fbGoogleSignIn) { showToast('Firebase not ready. Please refresh.', 'error'); return; }
+    await window._fbGoogleSignIn();
+    playSound('success');
+    showToast('Signed in with Google!', 'success');
+  } catch(e) {
+    if (e.code !== 'auth/popup-closed-by-user') {
+      showToast(getFriendlyError(e.code), 'error');
+    }
+    playSound('error');
   }
 }
 
-function loadUserState() {
-  const key  = `inatapass_state_${appState.currentUser.email}`;
-  const data = localStorage.getItem(key);
-  if (data) {
-    const parsed         = JSON.parse(data);
-    appState.uploadCount = parsed.uploadCount || 0;
-    appState.subscription = parsed.subscription || { plan: 'free', expiry: null };
-    appState.history     = parsed.history || [];
-  }
-  checkSubscriptionExpiry();
+function getFriendlyError(code) {
+  const map = {
+    'auth/invalid-credential':         'Incorrect email or password.',
+    'auth/user-not-found':             'No account found with this email.',
+    'auth/wrong-password':             'Incorrect password.',
+    'auth/email-already-in-use':       'An account with this email already exists.',
+    'auth/weak-password':              'Password must be at least 6 characters.',
+    'auth/invalid-email':              'Invalid email address.',
+    'auth/too-many-requests':          'Too many attempts. Please try again later.',
+    'auth/network-request-failed':     'Network error. Check your internet connection.',
+    'auth/popup-blocked':              'Popup blocked. Please allow popups and try again.'
+  };
+  return map[code] || 'Something went wrong. Please try again.';
 }
 
-function saveUserState() {
-  if (!appState.currentUser) return;
-  const key = `inatapass_state_${appState.currentUser.email}`;
-  localStorage.setItem(key, JSON.stringify({
-    uploadCount:  appState.uploadCount,
-    subscription: appState.subscription,
-    history:      appState.history
-  }));
+/* ─────────────────────────────────────────────
+   LOGOUT
+───────────────────────────────────────────── */
+async function handleLogout() {
+  try {
+    if (window._fbSignOut) await window._fbSignOut();
+  } catch(e) {}
+  appState.firebaseUser = null;
+  appState.userDbData   = null;
+  appState.originalImageData = null;
+  appState.bgRemovedData     = null;
+  appState.activeBackground  = null;
+  document.getElementById('appScreen').classList.add('hidden');
+  document.getElementById('authScreen').classList.remove('hidden');
+  document.getElementById('loginEmail').value    = '';
+  document.getElementById('loginPassword').value = '';
+  document.getElementById('regName').value       = '';
+  document.getElementById('regEmail').value      = '';
+  document.getElementById('regPassword').value   = '';
+  switchAuthTab('login');
+  goBackToUpload();
+  playSound('click');
 }
 
+/* ─────────────────────────────────────────────
+   SHOW APP
+───────────────────────────────────────────── */
 function showApp() {
   document.getElementById('authScreen').classList.add('hidden');
-  document.getElementById('accessCodeScreen').classList.add('hidden');
   document.getElementById('appScreen').classList.remove('hidden');
   updateNavUser();
   updateUploadBadge();
   updatePlanStatus();
   renderHistory();
   buildColorGrid();
-  buildThemeGrid();
+  buildFilterGrid();
+}
+
+function updateNavUser() {
+  const el   = document.getElementById('navUser');
+  const user = appState.firebaseUser;
+  if (!el) return;
+  if (user) {
+    const name = user.displayName || user.email || '';
+    el.textContent = name.split(/[@\s]/)[0];
+  }
+}
+
+function updateUploadBadge() {
+  const el  = document.getElementById('uploadLimitBadge');
+  if (!el) return;
+  const sub = appState.subscription;
+  if (sub.plan === 'free') {
+    el.textContent = `${sub.remainingRequests} of ${CONFIG.PLANS.free.requests} free requests remaining`;
+  } else {
+    const planCfg = CONFIG.PLANS[sub.plan] || {};
+    el.textContent = `${sub.plan.toUpperCase()} — ${sub.remainingRequests} requests left`;
+  }
+}
+
+function updatePlanStatus() {
+  const el  = document.getElementById('planStatus');
+  if (!el) return;
+  const sub = appState.subscription;
+  if (sub.plan === 'free') {
+    el.innerHTML = `<strong>Current Plan:</strong> Free &mdash; ${sub.remainingRequests} of ${CONFIG.PLANS.free.requests} requests remaining`;
+  } else {
+    const planCfg = CONFIG.PLANS[sub.plan] || {};
+    const days    = sub.expiry ? Math.max(0, Math.ceil((new Date(sub.expiry) - Date.now()) / 86400000)) : 0;
+    el.innerHTML  = `<strong>Current Plan:</strong> ${sub.plan.toUpperCase()} &mdash; ${sub.remainingRequests} requests left &mdash; ${days} days remaining`;
+  }
 }
 
 /* ─────────────────────────────────────────────
-   AUTH  —  Register (with sheet email check)
+   LITE PLAN SELECTOR
 ───────────────────────────────────────────── */
-async function handleRegister() {
-  const name  = document.getElementById('regName').value.trim();
-  const email = document.getElementById('regEmail').value.trim().toLowerCase();
-  const errEl = document.getElementById('regError');
-  const btn   = document.getElementById('registerBtn');
-  errEl.textContent = '';
-
-  if (!name || !email) { errEl.textContent = 'Name and email are required.'; playSound('error'); return; }
-  if (!/\S+@\S+\.\S+/.test(email)) { errEl.textContent = 'Invalid email address.'; playSound('error'); return; }
-
-  // 1️⃣  Check localStorage (instant)
-  const users = JSON.parse(localStorage.getItem('inatapass_users') || '[]');
-  if (users.find(u => u.email === email)) {
-    errEl.textContent = '⚠️ Account already exists with this email.';
-    playSound('error');
-    return;
-  }
-
-  // 2️⃣  Check Google Sheet (server-side — must wait for response)
-  btn.textContent = 'Checking availability…';
-  btn.disabled    = true;
-  errEl.textContent = '';
-
-  let sheetCheckPassed = false;
-  try {
-    const checkRes = await callSheetCheck(email);
-    if (checkRes && checkRes.exists) {
-      errEl.textContent = '⚠️ This email is already registered. Please contact support.';
-      playSound('error');
-      btn.textContent = 'Create Account →';
-      btn.disabled    = false;
-      return;
-    }
-    sheetCheckPassed = true; // confirmed: email not in sheet
-  } catch(e) {
-    // Sheet unreachable — log it but proceed (local check already passed)
-    console.warn('Sheet check failed, proceeding with local data:', e.message);
-    sheetCheckPassed = true;
-  }
-
-  if (!sheetCheckPassed) return; // safety guard
-
-  btn.textContent = 'Creating account…';
-
-  // 3️⃣  Save to localStorage
-  const user = { name, email, createdAt: new Date().toISOString() };
-  users.push(user);
-  localStorage.setItem('inatapass_users', JSON.stringify(users));
-  localStorage.setItem('inatapass_user',  JSON.stringify({ name, email }));
-  appState.currentUser = { name, email };
-  loadUserState();
-
-  // 4️⃣  Push to Sheet (blocking — wait so duplicate can't race through)
-  try {
-    btn.textContent = 'Saving to server…';
-    await pushToGoogleSheets(user);
-  } catch(e) { /* non-critical */ }
-
-  // 5️⃣  Send emails (non-blocking)
-  sendWelcomeEmails(name, email).catch(() => {});
-
-  playSound('success');
-  showToast('Account created! Welcome to InataPass', 'success');
-  btn.textContent = 'Create Account →';
-  btn.disabled    = false;
-  showApp();
-}
-
-function handleLogout() {
-  saveUserState();
-  localStorage.removeItem('inatapass_user');
-  appState.currentUser      = null;
-  appState.originalImageData = null;
-  appState.bgRemovedData    = null;
-  document.getElementById('appScreen').classList.add('hidden');
-  document.getElementById('authScreen').classList.remove('hidden');
-  document.getElementById('regName').value     = '';
-  document.getElementById('regEmail').value    = '';
-  document.getElementById('regError').textContent = '';
-  goBackToUpload();
-  playSound('click');
-}
-
-/* ─────────────────────────────────────────────
-   SHEET  helpers
-───────────────────────────────────────────── */
-// ── Sheet helpers ──
-// Google Apps Script blocks CORS on POST with JSON headers.
-// Workaround: send data as URL-encoded form POST (no preflight).
-// For checkUser (needs a real response) we use GET with query params.
-
-async function callSheetCheck(email) {
-  // GET request — Apps Script doGet() handles this, no CORS issue
-  const url = CONFIG.APPS_SCRIPT_URL + '?action=checkUser&email=' + encodeURIComponent(email);
-  const res = await fetch(url);
-  return res.json();
-}
-
-async function pushToGoogleSheets(user) {
-  if (!CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.includes('YOUR_SCRIPT_ID')) return;
-  try {
-    // Use no-cors form POST — browser allows this, Apps Script receives it fine
-    const formData = new FormData();
-    formData.append('payload', JSON.stringify({
-      action:    'addUser',
-      email:     user.email,
-      name:      user.name,
-      createdAt: user.createdAt
-    }));
-    await fetch(CONFIG.APPS_SCRIPT_URL, {
-      method: 'POST',
-      mode:   'no-cors',
-      body:   formData
+function setupLitePlanSelectors() {
+  const opts = document.querySelectorAll('.plan-price-option');
+  opts.forEach(opt => {
+    opt.addEventListener('click', () => {
+      opts.forEach(o => o.classList.remove('active-option'));
+      opt.classList.add('active-option');
+      appState.selectedLitePlan = opt.dataset.plan;
+      const btn = document.getElementById('litePurchaseBtn');
+      if (btn) btn.textContent = `Purchase Lite – ₹${opt.dataset.price}`;
     });
-  } catch(e) { console.warn('Sheets push failed:', e); }
-}
-
-/* ─────────────────────────────────────────────
-   EMAIL SYSTEM (EmailJS)
-───────────────────────────────────────────── */
-async function sendWelcomeEmails(name, email) {
-  try {
-    if (!window.emailjs) await loadEmailJS();
-    const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-    if (window.emailjs && CONFIG.EMAILJS_PUBLIC_KEY !== 'YOUR_EMAILJS_PUBLIC_KEY') {
-      emailjs.init(CONFIG.EMAILJS_PUBLIC_KEY);
-      await emailjs.send(CONFIG.EMAILJS_SERVICE_ID, 'template_user_welcome', {
-        to_email: email, to_name: name, subject: 'Welcome to InataPass 🎉'
-      });
-      await emailjs.send(CONFIG.EMAILJS_SERVICE_ID, 'template_admin_notify', {
-        to_email:  CONFIG.DEV_EMAIL,
-        user_email: email,
-        user_name:  name,
-        reg_time:   timestamp
-      });
-    }
-  } catch(err) { console.warn('Email send failed:', err.message); }
-}
-
-function loadEmailJS() {
-  return new Promise((res, rej) => {
-    if (window.emailjs) { res(); return; }
-    const s  = document.createElement('script');
-    s.src    = 'https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js';
-    s.onload = res;
-    s.onerror = rej;
-    document.head.appendChild(s);
   });
 }
 
 /* ─────────────────────────────────────────────
-   UPLOAD  (no size limit)
+   RAZORPAY PAYMENT
+───────────────────────────────────────────── */
+// Plan display name helper
+function getPlanDisplayName(planKey) {
+  const names = {
+    free:      'Free',
+    lite_1m:   'Lite (1 Month)',
+    lite_3m:   'Lite (3 Months)',
+    lite_6m:   'Lite (6 Months)',
+    lite_12m:  'Lite (12 Months)',
+    pro:       'Pro',
+    superpro:  'Super Pro'
+  };
+  return names[planKey] || planKey.toUpperCase();
+}
+
+function openRazorpay(planType) {
+  if (!appState.firebaseUser) { showToast('Please sign in first.', 'error'); return; }
+
+  // ── Active subscription guard ────────────────────────────────────────────────
+  const currentPlan   = appState.subscription?.plan || 'free';
+  const expiryDate    = appState.subscription?.expiry;
+  const isActivePaid  = currentPlan !== 'free' &&
+                        expiryDate &&
+                        new Date(expiryDate) > new Date();
+
+  if (isActivePaid) {
+    const planName    = getPlanDisplayName(currentPlan);
+    const expiryStr   = new Date(expiryDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    showToast(
+      `⚠️ "${planName}" is already active until ${expiryStr}. You can't purchase a new plan while your current subscription is active.`,
+      'error',
+      5000
+    );
+    playSound('error');
+    return;
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  let planKey, price, planName, requests;
+  if (planType === 'lite') {
+    planKey  = appState.selectedLitePlan || 'lite_1m';
+    const opt = document.querySelector('.plan-price-option.active-option');
+    price    = opt ? parseInt(opt.dataset.price) : 59;
+    requests = opt ? parseInt(opt.dataset.requests) : 20;
+    planName = `InstaPass Lite — ${opt ? opt.dataset.label : '1 Month'}`;
+  } else if (planType === 'pro') {
+    planKey  = 'pro'; price = 119; requests = 40; planName = 'InstaPass Pro';
+  } else {
+    planKey  = 'superpro'; price = 189; requests = 50; planName = 'InstaPass Super Pro';
+  }
+
+  if (!window.Razorpay) {
+    // Razorpay not loaded (test env) — show fallback
+    showToast('Payment gateway loading… Please try again.', 'info');
+    return;
+  }
+
+  const options = {
+    key:         CONFIG.RAZORPAY_KEY,
+    amount:      price * 100,
+    currency:    'INR',
+    name:        'InstaPass',
+    description: planName,
+    image:       'instapass.png',
+    prefill: {
+      email: appState.firebaseUser.email,
+      name:  appState.firebaseUser.displayName || ''
+    },
+    theme: { color: '#2563eb' },
+    handler: async function(response) {
+      await handlePaymentSuccess(response, planKey, price, requests);
+    },
+    modal: {
+      ondismiss: function() {
+        showToast('Payment cancelled.', '');
+      }
+    }
+  };
+
+  const rzp = new window.Razorpay(options);
+  rzp.open();
+}
+
+async function handlePaymentSuccess(response, planKey, price, requests) {
+  // ─── TEST MODE ───────────────────────────────────────────────────────────────
+  // Cloud Function (verifyPayment) abhi deploy nahi hai, isliye
+  // testing ke liye directly Firestore update kar rahe hain.
+  // ⚠️ Production mein jaane se pehle yahan Cloud Function wala code wapas laana.
+  // ─────────────────────────────────────────────────────────────────────────────
+  const uid = appState.firebaseUser?.uid;
+  if (!uid) { showToast('Not logged in.', 'error'); return; }
+
+  try {
+    const planCfg    = CONFIG.PLANS[planKey];
+    const now        = new Date();
+    const expiryDate = planCfg.days > 0
+      ? new Date(Date.now() + planCfg.days * 86400000).toISOString()
+      : null;
+
+    // Get current totalRequestsUsed to increment
+    const currentUsed = appState.userDbData?.totalRequestsUsed || 0;
+
+    // Firestore mein plan directly update karo (test mode)
+    if (window._fbUpdateDoc) {
+      await window._fbUpdateDoc(uid, {
+        plan:               planKey,
+        remainingRequests:  requests,
+        expiryDate:         expiryDate,
+        purchaseDate:       now.toISOString(),
+        lastPaymentId:      response.razorpay_payment_id || 'test_' + Date.now(),
+        lastPaymentDate:    now.toISOString(),
+        subscriptionStatus: 'active',
+        totalRequestsUsed:  currentUsed + 1
+      });
+    }
+
+    // Local state update
+    appState.subscription = {
+      plan:              planKey,
+      expiry:            expiryDate,
+      remainingRequests: requests
+    };
+    if (appState.userDbData) {
+      appState.userDbData.plan               = planKey;
+      appState.userDbData.remainingRequests  = requests;
+      appState.userDbData.expiryDate         = expiryDate;
+      appState.userDbData.purchaseDate       = now.toISOString();
+      appState.userDbData.totalRequestsUsed  = currentUsed + 1;
+      appState.userDbData.subscriptionStatus = 'active';
+    }
+
+    updateUploadBadge();
+    updatePlanStatus();
+    togglePanel('subPanel');
+    playSound('success');
+    showToast(`${planKey.toUpperCase()} plan activated! Enjoy.`, 'success');
+  } catch(e) {
+    showToast('Plan activation failed: ' + e.message, 'error');
+    console.error(e);
+  }
+}
+
+/* ─────────────────────────────────────────────
+   UPLOAD SYSTEM
+   File · Drag/Drop · Paste · Editor Replace
 ───────────────────────────────────────────── */
 function handleDragOver(e) {
   e.preventDefault();
-  document.getElementById('uploadZone').style.borderColor = 'var(--accent)';
+  e.stopPropagation();
+  document.getElementById('uploadZone').classList.add('drag-over');
 }
 function handleDrop(e) {
   e.preventDefault();
-  document.getElementById('uploadZone').style.borderColor = '';
+  e.stopPropagation();
+  document.getElementById('uploadZone').classList.remove('drag-over');
   const file = e.dataTransfer.files[0];
   if (file && file.type.startsWith('image/')) processFile(file);
 }
@@ -378,32 +584,59 @@ function handleFileSelect(e) {
   if (file) processFile(file);
   e.target.value = '';
 }
+// Drag onto editor canvas — replace image
+function handleEditorDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  document.getElementById('canvasWrap').style.borderColor = 'var(--accent2)';
+}
+function handleEditorDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  document.getElementById('canvasWrap').style.borderColor = '';
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) processFile(file);
+}
+// Ctrl+V Paste
+function setupPasteUpload() {
+  document.addEventListener('paste', (e) => {
+    const items = (e.clipboardData || e.originalEvent?.clipboardData)?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) { processFile(file); break; }
+      }
+    }
+  });
+}
 
 function canUpload() {
   const sub = appState.subscription;
-  if (sub.plan !== 'free') return true;
-  return appState.uploadCount < CONFIG.PLANS.free.uploads;
+  return sub.remainingRequests > 0;
 }
 
 function processFile(file) {
+  if (appState.timeBlocked) {
+    showToast('Please fix your device time before uploading.', 'error');
+    playSound('error');
+    return;
+  }
   if (!canUpload()) {
-    showToast('Upload limit reached. Please upgrade your plan! 💎', 'error');
+    showToast('No requests remaining. Please upgrade your plan.', 'error');
     playSound('error');
     togglePanel('subPanel');
     return;
   }
-  // ✅ No size limit check — any size accepted
   playSound('upload');
   const reader = new FileReader();
   reader.onload = (ev) => {
-    const img    = new Image();
-    img.onload   = () => {
+    const img  = new Image();
+    img.onload = () => {
       appState.originalImageData = ev.target.result;
       appState.bgRemovedData     = null;
       appState.activeBackground  = null;
-      appState.uploadCount++;
-      saveUserState();
-      updateUploadBadge();
+      appState.activeFilter      = null;
       openEditor(img);
     };
     img.src = ev.target.result;
@@ -416,21 +649,31 @@ function openEditor(img) {
   document.getElementById('editorSection').classList.remove('hidden');
   const canvas = document.getElementById('mainCanvas');
   const ctx    = canvas.getContext('2d');
-  appState.canvasCtx = ctx;
-  const maxW   = Math.min(img.naturalWidth, 1200);
-  const ratio  = maxW / img.naturalWidth;
-  canvas.width  = maxW;
-  canvas.height = img.naturalHeight * ratio;
+
+  // Full natural resolution — koi downscale nahi, pixel drop nahi hoga
+  canvas.width  = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  // Highest quality rendering
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   resetSliders();
-  showToast('Image loaded! Click "Remove Background" to start. ✦', 'info');
+  clearActiveFilters();
+  showToast('Image loaded! Click "Remove Background" to start.', 'info');
 }
 
 function goBackToUpload() {
   document.getElementById('editorSection').classList.add('hidden');
   document.getElementById('heroSection').classList.remove('hidden');
+  // ObjectURL cleanup to free memory
+  if (appState.bgRemovedData && appState.bgRemovedData.startsWith('blob:')) {
+    URL.revokeObjectURL(appState.bgRemovedData);
+  }
   appState.originalImageData = null;
   appState.bgRemovedData     = null;
+  appState.bgRemovedBlob     = null;
   appState.activeBackground  = null;
   const canvas = document.getElementById('mainCanvas');
   const ctx    = canvas.getContext('2d');
@@ -439,14 +682,29 @@ function goBackToUpload() {
 }
 
 /* ─────────────────────────────────────────────
-   BACKGROUND REMOVAL  (fixed btoa for large images)
+   BACKGROUND REMOVAL (via remove.bg API)
 ───────────────────────────────────────────── */
+
+// ⚠️ APNI remove.bg API KEY YAHAN DAALO
+// Free API key: https://www.remove.bg/api (50 free credits/month)
+const REMOVE_BG_API_KEY = 'a9sd1C2xXSQvtwG4Lrjqxn7G';
+
 async function removeBg() {
-  if (!appState.isOnline) { showToast('No internet connection!', 'error'); playSound('error'); return; }
-  if (!appState.originalImageData) { showToast('Upload an image first.', 'error'); return; }
+  if (!appState.isOnline)           { showToast('No internet connection!', 'error'); playSound('error'); return; }
+  if (appState.timeBlocked)         { showToast('Please fix your device time first.', 'error'); playSound('error'); return; }
+  if (!appState.originalImageData)  { showToast('Upload an image first.', 'error'); return; }
+  if (!canUpload())                 { showToast('No requests remaining. Please upgrade.', 'error'); playSound('error'); togglePanel('subPanel'); return; }
+
+  if (!REMOVE_BG_API_KEY || REMOVE_BG_API_KEY === 'YOUR_REMOVE_BG_API_KEY_HERE') {
+    showToast('Remove.bg API key not set. Please add your API key in main.js', 'error');
+    playSound('error');
+    return;
+  }
 
   const loader = document.getElementById('canvasLoader');
   loader.classList.remove('hidden');
+  const btn = document.getElementById('removeBgBtn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.7'; }
   playSound('open');
 
   try {
@@ -457,169 +715,297 @@ async function removeBg() {
 
     const res = await fetch('https://api.remove.bg/v1.0/removebg', {
       method:  'POST',
-      headers: { 'X-Api-Key': CONFIG.REMOVE_BG_API },
+      headers: { 'X-Api-Key': REMOVE_BG_API_KEY },
       body:    formData
     });
 
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.errors?.[0]?.title || `API Error ${res.status}`);
+      throw new Error(errJson.error || errJson.errors?.[0]?.title || `Server Error ${res.status}`);
     }
 
-    // ✅ Fixed: use Blob URL instead of btoa (avoids call stack overflow on large images)
     const resultBlob = await res.blob();
-    const objectUrl  = URL.createObjectURL(resultBlob);
 
-    const img     = new Image();
-    img.onload    = () => {
+    // Original PNG blob ko ArrayBuffer mein store karo — quality ZERO loss
+    const arrayBuffer = await resultBlob.arrayBuffer();
+    const bgRemovedBlob = new Blob([arrayBuffer], { type: 'image/png' });
+
+    const objectUrl  = URL.createObjectURL(bgRemovedBlob);
+    const img        = new Image();
+    img.onload = async () => {
+      // bgRemovedData mein original lossless PNG blob store karo (canvas se nahi)
+      appState.bgRemovedData     = objectUrl;
+      appState.bgRemovedBlob     = bgRemovedBlob; // download ke liye direct blob
+
       const canvas = document.getElementById('mainCanvas');
       const ctx    = canvas.getContext('2d');
       canvas.width  = img.naturalWidth;
       canvas.height = img.naturalHeight;
+
+      // Highest quality rendering — foreground pixels preserve honge
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (appState.activeBackground) applyBgToCanvas(ctx, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      // Also store as data URL for saving/history
-      appState.bgRemovedData = canvas.toDataURL('image/png');
-      URL.revokeObjectURL(objectUrl);
+      // Deduct request
+      appState.subscription.remainingRequests = Math.max(0, appState.subscription.remainingRequests - 1);
+      await saveRequestCountToFirebase();
+      updateUploadBadge();
+      updatePlanStatus();
+
+      // Apply watermark for free plan
+      if (appState.subscription.plan === 'free') applyWatermark();
 
       playSound('success');
-      showToast('Background removed successfully! ✦', 'success');
+      showToast('Background removed successfully!', 'success');
       loader.classList.add('hidden');
+      if (btn) { btn.disabled = false; btn.style.opacity = ''; }
     };
-    img.onerror   = () => {
+    img.onerror = () => {
       loader.classList.add('hidden');
+      if (btn) { btn.disabled = false; btn.style.opacity = ''; }
       showToast('Failed to load result image.', 'error');
-      URL.revokeObjectURL(objectUrl);
     };
     img.src = objectUrl;
 
   } catch(err) {
     loader.classList.add('hidden');
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
     playSound('error');
     showToast('BG removal failed: ' + err.message, 'error');
     console.error(err);
   }
 }
 
-/* ─────────────────────────────────────────────
-   BACKGROUNDS  —  Colors
-───────────────────────────────────────────── */
-const COLORS = [
-  '#ffffff','#f0f0f0','#000000','#1a1a2e','#16213e','#0f3460',
-  '#e94560','#ff6b6b','#ffa07a','#ffd700','#adff2f','#00fa9a',
-  '#00bfff','#1e90ff','#9370db','#da70d6','#ff69b4','#dc143c',
-  '#ff8c00','#32cd32','#00ced1','#4169e1','#8b008b','#a0522d',
-  '#808080','#c0c0c0','#b8860b','#006400','#00008b','#8b0000',
-  '#2e4057','#048a81','#54c6eb','#ef946c','#c4a35a','#3d5a80'
-];
+async function saveRequestCountToFirebase() {
+  const uid = appState.firebaseUser?.uid;
+  if (!uid || !window._fbUpdateDoc) return;
+  try {
+    await window._fbUpdateDoc(uid, {
+      remainingRequests: appState.subscription.remainingRequests,
+      totalRequestsUsed: (appState.userDbData?.totalRequestsUsed || 0) + 1
+    });
+  } catch(e) { console.warn('Request count update failed:', e); }
+}
 
 /* ─────────────────────────────────────────────
-   BACKGROUND SCENES  —  Real photo URLs (Unsplash)
+   WATERMARK SYSTEM
 ───────────────────────────────────────────── */
-const SCENES = [
-  { name: 'Beach',      url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80' },
-  { name: 'Office',     url: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800&q=80' },
-  { name: 'School',     url: 'https://images.unsplash.com/photo-1580582932707-520aed937b7b?w=800&q=80' },
-  { name: 'Mountain',   url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80' },
-  { name: 'Forest',     url: 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=800&q=80' },
-  { name: 'City Night', url: 'https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=800&q=80' },
-  { name: 'Studio',     url: 'https://images.unsplash.com/photo-1519924028-a79ca29b8445?w=800&q=80' },
-  { name: 'Library',    url: 'https://images.unsplash.com/photo-1507842217343-583bb7270b66?w=800&q=80' },
-  { name: 'Cafe',       url: 'https://images.unsplash.com/photo-1442512595331-e89e73853f31?w=800&q=80' },
-  { name: 'Desert',     url: 'https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=800&q=80' },
-  { name: 'Snowfield',  url: 'https://images.unsplash.com/photo-1478719059408-592965723cbc?w=800&q=80' },
-  { name: 'Garden',     url: 'https://images.unsplash.com/photo-1416879595882-3373a0480b5b?w=800&q=80' },
-  { name: 'Gym',        url: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80' },
-  { name: 'Kitchen',    url: 'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=800&q=80' },
-  { name: 'Sunset Sky', url: 'https://images.unsplash.com/photo-1495616811223-4d98c6e9c869?w=800&q=80' },
-  { name: 'Stage',      url: 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&q=80' },
-  { name: 'Space',      url: 'https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=800&q=80' },
-  { name: 'Waterfall',  url: 'https://images.unsplash.com/photo-1434394354979-a235cd36269d?w=800&q=80' }
+function applyWatermark() {
+  const canvas = document.getElementById('mainCanvas');
+  const ctx    = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+
+  const logoImg = new Image();
+  logoImg.onload = () => {
+    const size   = Math.min(w * 0.08, 56);
+    const pad    = 16;
+    const x      = w - size - pad;
+    const y      = h - size - pad - 22;
+
+    // Semi-transparent background pill
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    ctx.fillStyle   = 'rgba(255,255,255,0.85)';
+    ctx.beginPath();
+    const pw = size + 60, ph = size + 22;
+    const px = w - pw - pad + 4, py = h - ph - pad + 4;
+    ctx.roundRect(px, py, pw, ph, 8);
+    ctx.fill();
+
+    // Logo
+    ctx.globalAlpha = 1;
+    ctx.drawImage(logoImg, x, y, size, size);
+
+    // "InstaPass" text
+    ctx.font = `bold ${Math.max(12, size * 0.32)}px 'Kenia', cursive`;
+    ctx.fillStyle = '#1d4ed8';
+    ctx.textAlign = 'right';
+    ctx.globalAlpha = 0.9;
+    ctx.fillText('InstaPass', w - pad, h - pad - 2);
+    ctx.restore();
+  };
+  logoImg.src = 'instapass.png';
+}
+
+/* ─────────────────────────────────────────────
+   BACKGROUND COLORS
+───────────────────────────────────────────── */
+const COLORS = [
+  '#ffffff','#f8faff','#f0f4ff','#dbeafe','#000000','#0f172a',
+  '#1d4ed8','#2563eb','#38bdf8','#0ea5e9','#6366f1','#8b5cf6',
+  '#ec4899','#f43f5e','#ef4444','#f97316','#eab308','#22c55e',
+  '#10b981','#14b8a6','#06b6d4','#3b82f6','#a855f7','#d946ef',
+  '#64748b','#94a3b8','#e2e8f0','#fce7f3','#dcfce7','#dbeafe',
+  '#fef3c7','#fed7aa','#ffe4e6','#f0fdf4','#f0f9ff','#faf5ff'
 ];
 
 function buildColorGrid() {
   const grid = document.getElementById('colorGrid');
+  if (!grid) return;
   grid.innerHTML = '';
   COLORS.forEach(c => {
     const sw       = document.createElement('div');
     sw.className   = 'color-swatch sound-btn';
     sw.style.background = c;
     sw.title       = c;
-    sw.onclick     = () => { setBackground({ type: 'color', value: c }); setActiveClass(grid, sw); };
-    grid.appendChild(sw);
-  });
-}
-
-function buildThemeGrid() {
-  const grid = document.getElementById('themeGrid');
-  grid.innerHTML = '';
-  SCENES.forEach(scene => {
-    const sw     = document.createElement('div');
-    sw.className = 'theme-swatch sound-btn';
-    sw.style.backgroundImage = `url('${scene.url}')`;
-    sw.style.backgroundSize  = 'cover';
-    sw.style.backgroundPosition = 'center';
-    sw.innerHTML = `<div class="theme-label">${scene.name}</div>`;
-    sw.onclick   = () => {
-      setBackground({ type: 'image', value: scene.url });
-      setActiveClass(grid, sw);
+    sw.style.border = c === '#ffffff' || c === '#f8faff' || c === '#f0f4ff' ? '2px solid #e2e8f0' : '';
+    sw.onclick     = () => {
+      if (sw.classList.contains('active')) {
+        // Same color pe dobara click = background remove (transparent)
+        sw.classList.remove('active');
+        appState.activeBackground = null;
+        redrawCanvas();
+        playSound('click');
+      } else {
+        setBackground({ type: 'color', value: c });
+        setActiveClass(grid, sw);
+      }
     };
     grid.appendChild(sw);
   });
 }
 
+/* ─────────────────────────────────────────────
+   FILTERS
+───────────────────────────────────────────── */
+const FILTERS = [
+  { name: 'Portrait',      css: 'contrast(1.1) saturate(1.2) brightness(1.05)' },
+  { name: 'Soft Portrait', css: 'contrast(0.95) saturate(0.9) brightness(1.08) blur(0.3px)' },
+  { name: 'Cinematic',     css: 'contrast(1.2) saturate(0.85) brightness(0.95) sepia(0.15)' },
+  { name: 'Warm',          css: 'sepia(0.3) saturate(1.4) brightness(1.05) contrast(1.05)' },
+  { name: 'Cool',          css: 'hue-rotate(20deg) saturate(1.2) brightness(1.02)' },
+  { name: 'Vintage',       css: 'sepia(0.5) contrast(1.1) brightness(0.95) saturate(0.9)' },
+  { name: 'B&W',           css: 'grayscale(1) contrast(1.1)' },
+  { name: 'HDR',           css: 'contrast(1.3) saturate(1.4) brightness(0.95)' },
+  { name: 'Vibe',          css: 'hue-rotate(340deg) saturate(1.6) contrast(1.1)' },
+  { name: 'Fade',          css: 'contrast(0.85) saturate(0.8) brightness(1.1)' }
+];
+
+function buildFilterGrid() {
+  const grid = document.getElementById('filterGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  FILTERS.forEach((f, i) => {
+    const btn = document.createElement('button');
+    btn.className   = 'filter-btn sound-btn';
+    btn.textContent = f.name;
+    btn.dataset.idx = i;
+    btn.onclick     = () => {
+      if (btn.classList.contains('active')) {
+        btn.classList.remove('active');
+        appState.activeFilter = null;
+      } else {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        appState.activeFilter = f.css;
+      }
+      applyFilters();
+    };
+    grid.appendChild(btn);
+  });
+}
+
+function clearActiveFilters() {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  appState.activeFilter = null;
+}
+
+/* ─────────────────────────────────────────────
+   COLOR PICKER
+───────────────────────────────────────────── */
+function openColorPicker() {
+  document.getElementById('colorPickerDialog').classList.remove('hidden');
+  syncColorPickerFromHex(document.getElementById('fullColorPicker').value);
+}
+function closeColorPicker() {
+  document.getElementById('colorPickerDialog').classList.add('hidden');
+}
+function onColorPickerInput() {
+  const hex = document.getElementById('fullColorPicker').value;
+  syncColorPickerFromHex(hex);
+}
+function syncColorPickerFromHex(hex) {
+  document.getElementById('hexInput').value = hex;
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  document.getElementById('rInput').value = r;
+  document.getElementById('gInput').value = g;
+  document.getElementById('bInput').value = b;
+  document.getElementById('colorPreview').style.background = hex;
+}
+function onHexInput() {
+  let hex = document.getElementById('hexInput').value;
+  if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
+  document.getElementById('fullColorPicker').value = hex;
+  syncColorPickerFromHex(hex);
+}
+function onRgbInput() {
+  const r = Math.min(255, Math.max(0, parseInt(document.getElementById('rInput').value) || 0));
+  const g = Math.min(255, Math.max(0, parseInt(document.getElementById('gInput').value) || 0));
+  const b = Math.min(255, Math.max(0, parseInt(document.getElementById('bInput').value) || 0));
+  const hex = '#' + [r,g,b].map(x => x.toString(16).padStart(2,'0')).join('');
+  document.getElementById('fullColorPicker').value = hex;
+  document.getElementById('hexInput').value = hex;
+  document.getElementById('colorPreview').style.background = hex;
+}
+function applyPickedColor() {
+  const hex = document.getElementById('fullColorPicker').value;
+  setBackground({ type: 'color', value: hex });
+  closeColorPicker();
+  playSound('success');
+}
+
+/* ─────────────────────────────────────────────
+   BACKGROUNDS
+───────────────────────────────────────────── */
 function setActiveClass(parent, el) {
   parent.querySelectorAll('.active').forEach(x => x.classList.remove('active'));
   el.classList.add('active');
 }
-
 function setBackground(bg) {
   appState.activeBackground = bg;
   redrawCanvas();
   playSound('click');
 }
-
 function applyBgToCanvas(ctx, w, h) {
   const bg = appState.activeBackground;
   if (!bg) return;
-
   if (bg.type === 'color') {
     ctx.fillStyle = bg.value;
     ctx.fillRect(0, 0, w, h);
-
   } else if (bg.type === 'image') {
-    // Draw cached image if available; load otherwise
     if (bg._img && bg._img.complete) {
       ctx.drawImage(bg._img, 0, 0, w, h);
     } else if (!bg._loading) {
-      bg._loading  = true;
-      const img    = new Image();
+      bg._loading   = true;
+      const img     = new Image();
       img.crossOrigin = 'anonymous';
-      img.onload   = () => { bg._img = img; bg._loading = false; redrawCanvas(); };
-      img.onerror  = () => { bg._loading = false; };
-      img.src      = bg.value;
+      img.onload    = () => { bg._img = img; bg._loading = false; redrawCanvas(); };
+      img.onerror   = () => { bg._loading = false; };
+      img.src       = bg.value;
     }
   }
 }
-
 function redrawCanvas() {
   if (!appState.bgRemovedData && !appState.originalImageData) return;
   const canvas = document.getElementById('mainCanvas');
   const ctx    = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
   if (appState.activeBackground) applyBgToCanvas(ctx, canvas.width, canvas.height);
-
   const src = appState.bgRemovedData || appState.originalImageData;
   const img = new Image();
   img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); applyFilters(); };
-  img.src    = src;
+  // objectURL aur dataURL dono support karo
+  img.src = src;
 }
 
 /* ─────────────────────────────────────────────
-   IMAGE FILTERS
+   IMAGE FILTERS / CONTROLS
 ───────────────────────────────────────────── */
 function applyFilters() {
   const b  = document.getElementById('brightnessSlider').value;
@@ -627,28 +1013,43 @@ function applyFilters() {
   const s  = document.getElementById('saturationSlider').value;
   const sh = document.getElementById('sharpnessSlider').value;
   const bl = document.getElementById('blurSlider').value;
+  const ex = document.getElementById('exposureSlider').value;
+  const hl = document.getElementById('highlightsSlider').value;
+  const sd = document.getElementById('shadowsSlider').value;
+
   document.getElementById('brightnessVal').textContent = b;
   document.getElementById('contrastVal').textContent   = c;
   document.getElementById('saturationVal').textContent = s;
   document.getElementById('sharpnessVal').textContent  = sh;
   document.getElementById('blurVal').textContent       = bl;
+  document.getElementById('exposureVal').textContent   = ex;
+  document.getElementById('highlightsVal').textContent = hl;
+  document.getElementById('shadowsVal').textContent    = sd;
+
+  // Compute brightness with exposure
+  const brightCombined = Math.min(200, Math.max(0, parseInt(b) + parseInt(ex)));
+  const contrastCombined = Math.min(200, Math.max(0, parseInt(c) + Math.round(parseInt(hl) * 0.3)));
+
+  let filterStr = `brightness(${brightCombined}%) contrast(${contrastCombined}%) saturate(${s}%) blur(${bl}px)`;
+  if (appState.activeFilter) filterStr += ' ' + appState.activeFilter;
+
   const canvas = document.getElementById('mainCanvas');
-  canvas.style.filter = `brightness(${b}%) contrast(${c}%) saturate(${s}%) blur(${bl}px)`;
+  canvas.style.filter = filterStr;
 }
 
 function resetFilters() {
   ['brightness','contrast','saturation'].forEach(n => {
-    document.getElementById(n+'Slider').value      = 100;
-    document.getElementById(n+'Val').textContent   = '100';
+    document.getElementById(n+'Slider').value     = 100;
+    document.getElementById(n+'Val').textContent  = '100';
   });
-  document.getElementById('sharpnessSlider').value  = 0;
-  document.getElementById('sharpnessVal').textContent = '0';
-  document.getElementById('blurSlider').value       = 0;
-  document.getElementById('blurVal').textContent    = '0';
+  ['sharpness','blur','exposure','highlights','shadows'].forEach(n => {
+    document.getElementById(n+'Slider').value     = n === 'sharpness' ? 0 : 0;
+    document.getElementById(n+'Val').textContent  = '0';
+  });
   document.getElementById('mainCanvas').style.filter = '';
+  clearActiveFilters();
   playSound('click');
 }
-
 function resetSliders() { resetFilters(); }
 
 /* ─────────────────────────────────────────────
@@ -657,18 +1058,51 @@ function resetSliders() { resetFilters(); }
 function downloadImage() {
   const canvas = document.getElementById('mainCanvas');
   if (!canvas.width) { showToast('No image to download.', 'error'); return; }
+
+  const hasFilters  = canvas.style.filter && canvas.style.filter !== 'none' && canvas.style.filter !== '';
+  const hasBg       = !!appState.activeBackground;
+
+  // Agar koi filter/background nahi aur BG removed blob available hai — direct lossless download
+  if (!hasFilters && !hasBg && appState.bgRemovedBlob) {
+    const url  = URL.createObjectURL(appState.bgRemovedBlob);
+    const link = document.createElement('a');
+    link.download = `instapass_${Date.now()}.png`;
+    link.href     = url;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    playSound('download');
+    showToast('Downloaded in HD!', 'success');
+    return;
+  }
+
+  // Filter ya background ke saath — canvas se render karke download karo
   const off   = document.createElement('canvas');
   off.width   = canvas.width;
   off.height  = canvas.height;
   const octx  = off.getContext('2d');
-  octx.filter = canvas.style.filter || 'none';
-  octx.drawImage(canvas, 0, 0);
-  const link       = document.createElement('a');
-  link.download    = `inatapass_${Date.now()}.png`;
-  link.href        = off.toDataURL('image/png', 1.0);
-  link.click();
-  playSound('download');
-  showToast('Downloaded in full quality! ⬇', 'success');
+
+  // Highest quality rendering for download
+  octx.imageSmoothingEnabled = true;
+  octx.imageSmoothingQuality = 'high';
+
+  // Pehle background draw karo
+  if (hasBg) applyBgToCanvas(octx, off.width, off.height);
+
+  // Phir foreground image draw karo (filters ke saath)
+  octx.filter = hasFilters ? (canvas.style.filter || 'none') : 'none';
+
+  const src = appState.bgRemovedData || appState.originalImageData;
+  const img = new Image();
+  img.onload = () => {
+    octx.drawImage(img, 0, 0, off.width, off.height);
+    const link       = document.createElement('a');
+    link.download    = `instapass_${Date.now()}.png`;
+    link.href        = off.toDataURL('image/png', 1.0);
+    link.click();
+    playSound('download');
+    showToast('Downloaded in HD!', 'success');
+  };
+  img.src = src;
 }
 
 async function shareImage() {
@@ -676,9 +1110,9 @@ async function shareImage() {
   if (!canvas.width) { showToast('No image to share.', 'error'); return; }
   try {
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 1.0));
-    const file = new File([blob], 'inatapass.png', { type: 'image/png' });
-    if (navigator.share && navigator.canShare({ files: [file] })) {
-      await navigator.share({ title: 'InataPass Edit', files: [file] });
+    const file = new File([blob], 'instapass.png', { type: 'image/png' });
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ title: 'InstaPass Edit', files: [file] });
       playSound('success');
     } else { downloadImage(); }
   } catch(e) { showToast('Share cancelled.', ''); }
@@ -687,7 +1121,7 @@ async function shareImage() {
 function saveToHistory() {
   const canvas = document.getElementById('mainCanvas');
   if (!canvas.width) { showToast('No image to save.', 'error'); return; }
-  const thumb  = canvas.toDataURL('image/jpeg', 0.4);
+  const thumb  = canvas.toDataURL('image/jpeg', 0.35);
   const full   = canvas.toDataURL('image/png', 1.0);
   const entry  = {
     id:    Date.now(),
@@ -695,14 +1129,25 @@ function saveToHistory() {
     date:  new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
   };
   appState.history.unshift(entry);
-  if (appState.history.length > 30) appState.history.pop();
-  saveUserState();
+  if (appState.history.length > 25) appState.history.pop();
+  // Persist to localStorage (user-specific)
+  const uid = appState.firebaseUser?.uid || 'guest';
+  try { localStorage.setItem(`instapass_history_${uid}`, JSON.stringify(appState.history)); } catch(e) {}
   renderHistory();
   playSound('success');
-  showToast('Saved to history! 💾', 'success');
+  showToast('Saved to history!', 'success');
+}
+
+function loadHistory() {
+  const uid = appState.firebaseUser?.uid || 'guest';
+  try {
+    const raw = localStorage.getItem(`instapass_history_${uid}`);
+    if (raw) appState.history = JSON.parse(raw);
+  } catch(e) { appState.history = []; }
 }
 
 function renderHistory() {
+  loadHistory();
   const list = document.getElementById('historyList');
   if (!appState.history.length) {
     list.innerHTML = '<p class="empty-state">No saved edits yet. Save an edit to see it here.</p>';
@@ -712,10 +1157,12 @@ function renderHistory() {
     <div class="history-item">
       <img class="history-thumb" src="${h.thumb}" alt="edit" />
       <div class="history-info">
-        <h4>Edit #${h.id}</h4>
+        <h4>Edit #${String(h.id).slice(-6)}</h4>
         <p>${h.date}</p>
       </div>
-      <button class="history-dl sound-btn" onclick="downloadFromHistory(${h.id})">⬇</button>
+      <button class="history-dl sound-btn" onclick="downloadFromHistory(${h.id})" title="Download">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><polyline points="7 10 12 15 17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="15" x2="12" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
     </div>
   `).join('');
 }
@@ -725,163 +1172,15 @@ function downloadFromHistory(id) {
   if (!item) return;
   const a    = document.createElement('a');
   a.href     = item.full;
-  a.download = `inatapass_${id}.png`;
+  a.download = `instapass_${id}.png`;
   a.click();
   playSound('download');
-}
-
-/* ─────────────────────────────────────────────
-   SUBSCRIPTION
-───────────────────────────────────────────── */
-function checkSubscriptionExpiry() {
-  const sub = appState.subscription;
-  if (!sub.expiry || sub.plan === 'free') return;
-  fetch('https://worldtimeapi.org/api/timezone/Asia/Kolkata')
-    .then(r => r.json())
-    .then(data => {
-      const serverTime = new Date(data.datetime).getTime();
-      if (serverTime > new Date(sub.expiry).getTime()) {
-        appState.subscription = { plan: 'free', expiry: null };
-        appState.uploadCount  = 0;
-        saveUserState();
-        updateUploadBadge();
-        updatePlanStatus();
-        showToast('Your subscription has expired. Please renew.', 'error');
-        playSound('error');
-      }
-    })
-    .catch(() => {
-      if (Date.now() > new Date(sub.expiry).getTime()) {
-        appState.subscription = { plan: 'free', expiry: null };
-        saveUserState();
-      }
-    });
-}
-
-function updatePlanStatus() {
-  const el  = document.getElementById('planStatus');
-  if (!el) return;
-  const sub = appState.subscription;
-  if (sub.plan === 'free') {
-    el.innerHTML = `<strong>Current Plan:</strong> Free · ${CONFIG.PLANS.free.uploads - appState.uploadCount} uploads remaining`;
-  } else {
-    const days = Math.max(0, Math.ceil((new Date(sub.expiry) - Date.now()) / 86400000));
-    el.innerHTML = `<strong>Current Plan:</strong> ${sub.plan.charAt(0).toUpperCase()+sub.plan.slice(1)} · ${days} days remaining`;
-  }
-}
-
-function updateNavUser() {
-  const el = document.getElementById('navUser');
-  if (el && appState.currentUser) el.textContent = appState.currentUser.name.split(' ')[0];
-}
-
-function updateUploadBadge() {
-  const el  = document.getElementById('uploadLimitBadge');
-  if (!el) return;
-  const sub = appState.subscription;
-  if (sub.plan === 'free') {
-    el.textContent = `${appState.uploadCount}/${CONFIG.PLANS.free.uploads} free uploads used`;
-  } else {
-    el.textContent = `✦ ${sub.plan.charAt(0).toUpperCase()+sub.plan.slice(1)} – Unlimited uploads`;
-  }
-}
-
-/* ─────────────────────────────────────────────
-   PURCHASE FLOW
-   1. Open device payment app with prefilled amount
-   2. Show access code screen with plan details
-───────────────────────────────────────────── */
-function openPurchase(plan) {
-  const prices = { monthly: 199, premium: 550 };
-  const price  = prices[plan];
-
-  // Store pending plan
-  appState.pendingPlan = plan;
-
-  // Open device payment app (UPI deep link — works on Android/iOS with UPI apps)
-  const upiLink = `upi://pay?pa=munazzashaikh531@upi&pn=InataPass&am=${price}&cu=INR&tn=InataPass+${plan}+plan`;
-  window.open(upiLink, '_blank');
-
-  // After a short delay, show access code screen
-  setTimeout(() => showAccessCodeScreen(plan), 800);
-  playSound('click');
-}
-
-function showAccessCodeScreen(plan) {
-  const prices    = { monthly: 199, premium: 550 };
-  const durations = { monthly: '31 days', premium: '95 days' };
-  const price     = prices[plan];
-  const duration  = durations[plan];
-  const planLabel = plan.charAt(0).toUpperCase() + plan.slice(1);
-
-  // Fill plan info
-  document.getElementById('accessPlanInfo').innerHTML = `
-    <div class="access-plan-card">
-      <div class="apc-name">${planLabel} Plan</div>
-      <div class="apc-price">₹${price}</div>
-      <div class="apc-dur">Valid for ${duration}</div>
-      <ul class="apc-features">
-        <li>✓ Unlimited uploads</li>
-        <li>✓ All editing tools</li>
-        <li>✓ All background scenes</li>
-        <li>✓ Priority support</li>
-      </ul>
-    </div>
-  `;
-
-  // Clear previous input & note
-  document.getElementById('accessCodeInput').value = '';
-  document.getElementById('accessNote').textContent = '';
-
-  // Hide app & sub panel, show access code screen
-  document.getElementById('subPanel').classList.remove('open');
-  document.getElementById('panelOverlay').classList.add('hidden');
-  document.getElementById('accessCodeScreen').classList.remove('hidden');
-  playSound('open');
-}
-
-function closeAccessCodeScreen() {
-  document.getElementById('accessCodeScreen').classList.add('hidden');
-  playSound('close');
-}
-
-function verifyAccessCode() {
-  const code = document.getElementById('accessCodeInput').value.trim();
-  const note = document.getElementById('accessNote');
-  const plan = appState.pendingPlan || 'monthly';
-
-  if (code !== CONFIG.ACTIVATION_CODE) {
-    note.className   = 'access-note error';
-    note.textContent = '✗ Invalid access code. Contact admin for your code.';
-    playSound('error');
-    return;
-  }
-
-  // Activate plan
-  const days   = CONFIG.PLANS[plan].days;
-  const expiry = new Date(Date.now() + days * 86400000).toISOString();
-  appState.subscription = { plan, expiry };
-  appState.uploadCount  = 0;
-  saveUserState();
-  updateUploadBadge();
-  updatePlanStatus();
-
-  note.className   = 'access-note success';
-  note.textContent = `✓ ${plan.charAt(0).toUpperCase()+plan.slice(1)} plan activated! Valid for ${days} days.`;
-  playSound('success');
-  showToast('Plan activated! Enjoy unlimited access. 🎉', 'success');
-
-  setTimeout(() => {
-    closeAccessCodeScreen();
-    appState.pendingPlan = null;
-  }, 1800);
 }
 
 /* ─────────────────────────────────────────────
    PANELS
 ───────────────────────────────────────────── */
 let activePanel = null;
-
 function togglePanel(id) {
   const panel   = document.getElementById(id);
   const overlay = document.getElementById('panelOverlay');
@@ -900,10 +1199,10 @@ function togglePanel(id) {
     if (id === 'historyPanel') renderHistory();
   }
 }
-
 function closeAllPanels() {
   document.querySelectorAll('.slide-panel').forEach(p => p.classList.remove('open'));
-  document.getElementById('panelOverlay').classList.add('hidden');
+  const overlay = document.getElementById('panelOverlay');
+  if (overlay) overlay.classList.add('hidden');
   if (activePanel) playSound('close');
   activePanel = null;
 }
