@@ -687,7 +687,7 @@ function goBackToUpload() {
 
 // ⚠️ APNI remove.bg API KEY YAHAN DAALO
 // Free API key: https://www.remove.bg/api (50 free credits/month)
-const REMOVE_BG_API_KEY = 'a9sd1C2xXSQvtwG4Lrjqxn7G';
+const REMOVE_BG_API_KEY = 'wxPVvpn1UyowSszChEFX5uB4';
 
 async function removeBg() {
   if (!appState.isOnline)           { showToast('No internet connection!', 'error'); playSound('error'); return; }
