@@ -164,7 +164,7 @@ checkOnline();
 
 /* ─────────────────────────────────────────────
    TIME SECURITY — Firebase Server Time
-   No third-party API. Uses Firebase Cloud Function.
+   No third-party . Uses Firebase Cloud Function.
 ───────────────────────────────────────────── */
 async function checkInternetTime() {
   const banner = document.getElementById('timeWarningBanner');
@@ -682,12 +682,12 @@ function goBackToUpload() {
 }
 
 /* ─────────────────────────────────────────────
-   BACKGROUND REMOVAL (via remove.bg API)
+   BACKGROUND REMOVAL (via remove.bg )
 ───────────────────────────────────────────── */
 
-// ⚠️ APNI remove.bg API KEY YAHAN DAALO
+// ⚠️ APNI remove.bg  KEY YAHAN DAALO
 // Free API key: https://www.remove.bg/api (50 free credits/month)
-const REMOVE_BG_API_KEY = 'a9sd1C2xXSQvtwG4Lrjqxn7G';
+const REMOVE_BG_API_KEY = 'kjKXAGPniMtZ2jLZqtxaARpS';
 
 async function removeBg() {
   if (!appState.isOnline)           { showToast('No internet connection!', 'error'); playSound('error'); return; }
